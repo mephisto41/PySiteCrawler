@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-
-import stem
-import stem.connection
+import io
+import pycurl
 
 import time
-import urllib2
 
 from stem import Signal
 from stem.control import Controller
@@ -12,7 +10,7 @@ from stem.control import Controller
 # initialize some HTTP headers
 # for later usage in URL requests
 user_agent = 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.0.7) Gecko/2009021910 Firefox/3.0.7'
-headers={'User-Agent':user_agent}
+headers = {'User-Agent': user_agent}
 
 # initialize some
 # holding variables
@@ -21,36 +19,61 @@ newIP = "0.0.0.0"
 
 # how many IP addresses
 # through which to iterate?
-nbrOfIpAddresses = 3
+nbrOfIpAddresses = 300000
 
 # seconds between
 # IP address checks
-secondsBetweenChecks = 2
+secondsBetweenChecks = 1
 
-# request a URL 
+
+# request a URL
 def request(url):
     # communicate with TOR via a local proxy (privoxy)
-    def _set_urlproxy():
-        proxy_support = urllib2.ProxyHandler({"http" : "127.0.0.1:8118"})
-        opener = urllib2.build_opener(proxy_support)
-        urllib2.install_opener(opener)
-        
-    # request a URL
-    # via the proxy
-    _set_urlproxy()
-    request=urllib2.Request(url, None, headers)
-    return urllib2.urlopen(request).read()
+    output = io.BytesIO()
 
-# signal TOR for a new connection 
+    query = pycurl.Curl()
+    query.setopt(pycurl.URL, url)
+    query.setopt(pycurl.PROXY, 'localhost')
+    query.setopt(pycurl.PROXYPORT, 9050)
+    query.setopt(pycurl.PROXYTYPE, pycurl.PROXYTYPE_SOCKS5_HOSTNAME)
+    query.setopt(pycurl.WRITEFUNCTION, output.write)
+    query.setopt(pycurl.USERAGENT, user_agent)
+
+    try:
+        query.perform()
+        print(url + " " + str(query.getinfo(pycurl.HTTP_CODE)))
+        return output.getvalue()
+    except pycurl.error as exc:
+        return "Unable to reach %s (%s)" % (url, exc)
+
+
+def requestWithoutTor(url):
+    # communicate with TOR via a local proxy (privoxy)
+    output = io.BytesIO()
+
+    query = pycurl.Curl()
+    query.setopt(pycurl.URL, url)
+    query.setopt(pycurl.WRITEFUNCTION, output.write)
+
+    try:
+        query.perform()
+        print(query.getinfo(pycurl.HTTP_CODE))
+        return output.getvalue()
+    except pycurl.error as exc:
+        return "Unable to reach %s (%s)" % (url, exc)
+
+
+# signal TOR for a new connection
 def renew_connection():
-    with Controller.from_port(port = 9051) as controller:
-        controller.authenticate(password = 'my_password')
+    print ("renew")
+    with Controller.from_port(port=9051) as controller:
+        controller.authenticate(password='my_password')
         controller.signal(Signal.NEWNYM)
         controller.close()
 
 # cycle through
 # the specified number
-# of IP addresses via TOR 
+# of IP addresses via TOR
 for i in range(0, nbrOfIpAddresses):
 
     # if it's the first pass
@@ -70,9 +93,12 @@ for i in range(0, nbrOfIpAddresses):
         # obtain the "new" IP address
         newIP = request("http://icanhazip.com/")
 
-    # zero the 
-    # elapsed seconds    
+    # zero the
+    # elapsed seconds
     seconds = 0
+    # print(requestWithoutTor("http://icanhazip.com/"))
+    # requestWithoutTor("https://www.amazon.com/")
+    request("https://www.amazon.com/")
 
     # loop until the "new" IP address
     # is different than the "old" IP address,
@@ -86,6 +112,7 @@ for i in range(0, nbrOfIpAddresses):
         seconds += secondsBetweenChecks
         # obtain the current IP address
         newIP = request("http://icanhazip.com/")
+        request("https://www.amazon.com/")
         # signal that the program is still awaiting a different IP address
         print ("%d seconds elapsed awaiting a different IP address." % seconds)
     # output the
